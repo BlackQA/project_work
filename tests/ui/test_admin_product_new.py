@@ -50,7 +50,7 @@ def reset_browser(browser, base_url):
             "B",
             "C",
             faker.lexify(text="?"),
-            "Success: You have modified products!",
+            "Warning: Please check the form carefully for errors!",  # здесь ошибка для проверки скриншота
         ),
         (
             "user",
@@ -62,7 +62,7 @@ def reset_browser(browser, base_url):
             "Warning: Please check the form carefully for errors!",
         ),
     ],
-    ids=["standard", "name_empty", "invalid_seo", "minimal_values", "rus_seo"],
+    ids=["standard", "name_empty", "invalid_seo", "checking_error ", "rus_seo"],
 )
 @allure.feature("Создание нового продукта")
 @allure.story("Тестирование процесса создания нового продукта")

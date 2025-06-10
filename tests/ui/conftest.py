@@ -15,11 +15,8 @@ from selenium.webdriver.firefox.options import Options as FFOptions
 logger = logging.getLogger(__name__)
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("pytest.log"),
-        logging.StreamHandler()
-    ]
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler("../../pytest.log"), logging.StreamHandler()],
 )
 
 
@@ -39,7 +36,7 @@ def pytest_addoption(parser):
     parser.addoption(
         "--headless",
         action="store_true",
-        default=False,
+        default=True,
         help="Run tests in headless mode",
     )
 
@@ -56,7 +53,9 @@ def pytest_runtest_makereport(item, call):
                 screenshot_dir = os.path.join("allure-results", "screenshots")
                 os.makedirs(screenshot_dir, exist_ok=True)
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                screenshot_path = os.path.join(screenshot_dir, f"{item.name}_{timestamp}.png")
+                screenshot_path = os.path.join(
+                    screenshot_dir, f"{item.name}_{timestamp}.png"
+                )
 
                 driver.save_screenshot(screenshot_path)
                 logger.error(f"Test failed, screenshot saved to: {screenshot_path}")
@@ -114,7 +113,6 @@ def browser(request):
         else:
             raise ValueError(f"Unsupported browser: {browser_name}")
 
-
         driver.implicitly_wait(10)
 
         allure.attach(
@@ -122,7 +120,6 @@ def browser(request):
             body=json.dumps(driver.capabilities, indent=4, ensure_ascii=False),
             attachment_type=allure.attachment_type.JSON,
         )
-
 
         driver.test_name = request.node.name
         driver.start_time = datetime.now()
@@ -133,7 +130,6 @@ def browser(request):
             lambda d: d.execute_script("return document.readyState") == "complete"
         )
         logger.info(f"Opened URL: {base_url}")
-
 
         request.session.driver = driver
 
@@ -148,7 +144,11 @@ def browser(request):
         pytest.fail(f"Browser initialization failed: {str(e)}")
 
     finally:
-        if driver and hasattr(request.node, "rep_call") and request.node.rep_call.failed:
+        if (
+            driver
+            and hasattr(request.node, "rep_call")
+            and request.node.rep_call.failed
+        ):
             try:
                 allure.attach(
                     driver.get_screenshot_as_png(),

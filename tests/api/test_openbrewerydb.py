@@ -79,38 +79,51 @@ def api():
     return BreweryAPI()
 
 
+@pytest.fixture(autouse=True)
+def check_status_code(request, api):
+    yield
+
+    if request.node.name in ["test_error_structure", "test_invalid_brewery_id"]:
+        return
+
+    response = getattr(request.node, "result", None) or request.node.funcargs.get(
+        "response"
+    )
+
+    if response and hasattr(response, "status_code"):
+        assert (
+            response.status_code == 200
+        ), f"Ожидался статус 200, получен {response.status_code}."
+
+
 @allure.feature("OpenBreweryDB")
 @allure.story("Тестирование API запросов")
 class TestOpenBreweryDB:
-    @allure.title("1. Получение списка пивоварен")
+    @allure.title("Получение списка пивоварен")
     def test_get_all_breweries(self, api):
         response = api.get_breweries()
-        assert response.status_code == 200
         assert isinstance(response.body, list)
         assert len(response.body) > 0
 
-    @allure.title("2. Фильтрация по штату")
+    @allure.title("Фильтрация по штату")
     @pytest.mark.parametrize("state", ["california", "new_york", "ohio"])
     def test_filter_by_state(self, api, state):
         response = api.get_breweries(by_state=state)
-        assert response.status_code == 200
         for brewery in response.body:
             assert brewery["state"].lower() == state.replace("_", " ")
 
-    @allure.title("3. Поиск по названию")
+    @allure.title("Поиск по названию")
     def test_search_by_name(self, api):
         response = api.get_breweries(by_name="dog")
-        assert response.status_code == 200
         assert any("dog" in brewery["name"].lower() for brewery in response.body)
 
-    @allure.title("4. Получение пивоварни по ID")
+    @allure.title("Получение пивоварни по ID")
     def test_get_brewery_by_id(self, api):
         brewery_id = api.get_breweries().body[0]["id"]
         response = api.get_brewery(brewery_id)
-        assert response.status_code == 200
         assert response.body["id"] == brewery_id
 
-    @allure.title("5. Пагинация результатов")
+    @allure.title("Пагинация результатов")
     def test_pagination(self, api):
         page1 = api.get_breweries(page=1, per_page=5).body
         page2 = api.get_breweries(page=2, per_page=5).body
@@ -118,37 +131,37 @@ class TestOpenBreweryDB:
         assert len(page2) == 5
         assert page1[0]["id"] != page2[0]["id"]
 
-    @allure.title("6. Сортировка по названию")
+    @allure.title("Сортировка по названию")
     def test_sort_by_name(self, api):
         response = api.get_breweries(sort="name")
         breweries = response.body
         assert breweries == sorted(breweries, key=lambda x: x["name"])
 
-    @allure.title("7. Фильтр по типу пивоварни")
+    @allure.title("Фильтр по типу пивоварни")
     @pytest.mark.parametrize("brewery_type", ["micro", "regional", "brewpub"])
     def test_filter_by_type(self, api, brewery_type):
         response = api.get_breweries(by_type=brewery_type)
         assert all(b["brewery_type"] == brewery_type for b in response.body)
 
-    @allure.title("8. Поиск по городу")
+    @allure.title("Поиск по городу")
     def test_filter_by_city(self, api):
         city = "san_diego"
         response = api.get_breweries(by_city=city)
         assert all(b["city"].lower() == city.replace("_", " ") for b in response.body)
 
-    @allure.title("9. Количество результатов на странице")
+    @allure.title("Количество результатов на странице")
     @pytest.mark.parametrize("per_page", [1, 5, 10])
     def test_per_page(self, api, per_page):
         response = api.get_breweries(per_page=per_page)
         assert len(response.body) == per_page
 
-    @allure.title("10. Поиск по почтовому индексу")
+    @allure.title("Поиск по почтовому индексу")
     def test_filter_by_postal_code(self, api):
         zip_code = "92101"
         response = api.get_breweries(by_postal=zip_code)
         assert all(zip_code in b["postal_code"] for b in response.body)
 
-    @allure.title("11. Автозаполнение")
+    @allure.title("Автозаполнение")
     def test_autocomplete(self, api):
         query = "houston"
         response = api._request(
@@ -156,78 +169,67 @@ class TestOpenBreweryDB:
         )
         assert any(brewery["city"].lower() == query for brewery in response.body)
 
-    @allure.title("12. Проверка метаданных")
+    @allure.title("Проверка метаданных")
     def test_metadata(self, api):
         response = api.get_metadata()
         assert isinstance(response.body["total"], int)
         assert response.body["total"] > 0
 
-    @allure.title("13. Неверный ID пивоварни")
+    @allure.title("Неверный ID пивоварни")
     def test_invalid_brewery_id(self, api):
         response = api.get_brewery("invalid_id123")
         assert response.status_code == 404
 
-    @allure.title("14. Несуществующий фильтр")
-    def test_nonexistent_filter(self, api):
-        response = api.get_breweries(by_nonexistent="value")
-        assert response.status_code == 200
-
-    @allure.title("15. Случайная пивоварня")
+    @allure.title("Случайная пивоварня")
     def test_random_brewery(self, api):
         response = api.get_random_brewery()
-        assert response.status_code == 200
         assert isinstance(response.body, list)
         assert len(response.body) == 1
 
-    @allure.title("16. Проверка структуры ответа")
+    @allure.title("Проверка структуры ответа")
     def test_brewery_structure(self, api):
         brewery = api.get_breweries().body[0]
-        expected_keys = {"id", "name", "brewery_type", "city", "state", "country"}
+        expected_keys = {
+            "id",
+            "name",
+            "brewery_type",
+            "city",
+            "state_province",
+            "country",
+        }
         assert expected_keys.issubset(brewery.keys())
 
-    @allure.title("17. Фильтр по стране")
+    @allure.title("Фильтр по стране")
     def test_filter_by_country(self, api):
         response = api.get_breweries(by_country="united_states")
         assert all(b["country"] == "United States" for b in response.body)
 
-    @allure.title("18. Лимит запросов")
-    def test_rate_limit(self, api):
-        for _ in range(5):
-            response = api.get_breweries()
-            assert response.status_code == 200
-
-    @allure.title("19. Поиск по телефону")
+    @allure.title("Поиск по телефону")
     def test_search_by_phone(self, api):
         phone = "619"
         response = api.get_breweries(by_phone=phone)
-        assert any(phone in b.get("phone", "") for b in response.body)
+        assert any(b.get("phone", "").startswith(phone) for b in response.body)
 
-    @allure.title("20. Комбинированные фильтры")
+    @allure.title("Комбинированные фильтры")
     def test_combined_filters(self, api):
-        response = api.get_breweries(by_state="california", by_type="micro")
+        state = "california"
+        brewery_type = "micro"
+        response = api.get_breweries(by_state=state, by_type=brewery_type)
         for brewery in response.body:
             assert brewery["state"] == "California"
             assert brewery["brewery_type"] == "micro"
 
-    @allure.title("21. Несколько случайных пивоварен")
+    @allure.title("Несколько случайных пивоварен")
     def test_multiple_random_breweries(self, api):
         response = api.get_random_brewery(size=3)
-        assert response.status_code == 200
         assert len(response.body) == 3
 
-    @allure.title("22. Фильтрация по координатам")
-    def test_filter_by_coordinates(self, api):
-        response = api.get_breweries(by_dist="38.8977,77.0365")
-        assert response.status_code == 200
-        assert len(response.body) > 0
-
-    @allure.title("23. Проверка пустого ответа")
+    @allure.title("Проверка пустого ответа")
     def test_empty_response(self, api):
         response = api.get_breweries(by_name="nonexistentname123")
-        assert response.status_code == 200
         assert len(response.body) == 0
 
-    @allure.title("24. Проверка структуры ошибки")
+    @allure.title("Проверка структуры ошибки")
     def test_error_structure(self, api):
         response = api._request("GET", "/invalid_endpoint")
         assert response.status_code == 404

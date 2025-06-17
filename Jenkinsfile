@@ -1,20 +1,31 @@
 pipeline {
     agent any
 
-    environment {
-        OPENCART_URL = "http://opencart:8080"
-    }
-
     stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'stage_one',
+                url: 'https://github.com/BlackQA/project_work.git'
+            }
+        }
+
         stage('Prepare') {
             steps {
                 script {
                     sh '''
-                    apt-get update && apt-get install -y python3 python3-pip python3-venv
+                    echo "Установка зависимостей Python..."
                     python3 -m venv venv
                     . venv/bin/activate
-                    pip install -r requirements.txt
-                    pip install pytest allure-pytest
+
+                    # Добавляем проект в PYTHONPATH
+                    export PYTHONPATH="${WORKSPACE}:${PYTHONPATH}"
+
+                    # Устанавливаем зависимости
+                    if [ -f "requirements.txt" ]; then
+                        pip install -r requirements.txt
+                    else
+                        pip install pytest allure-pytest
+                    fi
                     '''
                 }
             }
@@ -25,6 +36,7 @@ pipeline {
                 script {
                     sh '''
                     . venv/bin/activate
+                    export PYTHONPATH="${WORKSPACE}:${PYTHONPATH}"
                     pytest --alluredir=allure-results ./tests
                     '''
                 }

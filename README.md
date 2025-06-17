@@ -19,20 +19,26 @@
 - Параметризованные тесты 
 - 
 ## Установка зависимостей:
+
 ```bash
   pip install -r requirements.txt
-  
+```
 
-## Тесты:
-Запуск всех тестов с генерацией Allure отчетов:
+Тесты:
+Запуск всех тестов:
+
 ```bash
-pytest tests/ --alluredir=allure-results
-allure serve allure-results
+pytest tests/
+```
 
 Запуск UI тестов в headless режиме:
+
 ```bash
 pytest tests/ui/ --headless --browser=chrome
+```
 
 Запуск API тестов:
+
 ```bash
 pytest tests/api/
+```

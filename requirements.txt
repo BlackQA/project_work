@@ -31,3 +31,4 @@ webdriver-manager==4.0.2
 websocket-client==1.8.0
 wsproto==1.2.0
 allure-pytest==2.13.5
+faker==37.3.0

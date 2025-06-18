@@ -3,54 +3,56 @@ import pytest
 import allure
 import json
 import os
+import platform
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import WebDriverException
-from selenium.webdriver.chromium.service import ChromiumService
-from selenium.webdriver.chrome.options import Options as ChromeOptions
-from selenium.webdriver.firefox.options import Options as FFOptions
 from selenium.webdriver.chrome.service import Service as ChromeService
+from selenium.webdriver.chrome.options import Options as ChromeOptions
+from selenium.webdriver.firefox.service import Service as FirefoxService
+from selenium.webdriver.firefox.options import Options as FFOptions
 from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.firefox import GeckoDriverManager
 
-
+# Настройка логирования
 logger = logging.getLogger(__name__)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[logging.FileHandler("../../pytest.log"), logging.StreamHandler()],
+    handlers=[
+        logging.FileHandler(os.path.join(os.getcwd(), "pytest.log")),
+        logging.StreamHandler()
+    ],
 )
 
 
 def pytest_addoption(parser):
+    """Регистрация кастомных параметров pytest"""
     parser.addoption(
         "--browser",
         action="store",
         default="chrome",
         help="Browser to run tests: chrome, firefox, yandex",
+        choices=["chrome", "firefox", "yandex"]
     )
     parser.addoption(
         "--base_url",
         action="store",
         default="http://192.168.0.119:8081/",
-        help="Base URL OpenCart",
+        help="Base application URL"
     )
     parser.addoption(
         "--headless",
         action="store_true",
         default=True,
-        help="Run tests in headless mode",
-    )
-    parser.addoption(
-        "--use_wdm",
-        action="store_true",
-        default=True,
-        help="Use WebDriver Manager for automatic driver setup",
+        help="Run tests in headless mode"
     )
 
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
 def pytest_runtest_makereport(item, call):
+    """Создание отчетов и скриншотов для упавших тестов"""
     outcome = yield
     rep = outcome.get_result()
 
@@ -77,116 +79,98 @@ def pytest_runtest_makereport(item, call):
                 logger.error(f"Failed to take screenshot: {str(e)}")
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def browser(request):
+    """Фикстура для инициализации браузера с поддержкой test_name"""
     browser_name = request.config.getoption("--browser").lower()
     base_url = request.config.getoption("--base_url")
     headless = request.config.getoption("--headless")
-    use_wdm = request.config.getoption("--use_wdm")
-    is_jenkins = os.environ.get('JENKINS_HOME') is not None
-    is_docker = os.path.exists('/.dockerenv')
 
-    logger.info(f"Starting {browser_name} browser, headless={headless}")
+    # Определяем окружение
+    is_jenkins = "JENKINS_HOME" in os.environ
+    is_docker = os.path.exists("/.dockerenv")
+    is_mac_arm = platform.system() == 'Darwin' and platform.machine() == 'arm64'
+
+    logger.info(f"Starting {browser_name} browser (headless={headless})")
 
     driver = None
     try:
         if browser_name in ["chrome", "ch"]:
             options = ChromeOptions()
 
-            # Общие настройки для Chrome
+            # Общие настройки
             options.add_argument("--window-size=1920,1080")
             options.add_argument("--no-sandbox")
             options.add_argument("--disable-dev-shm-usage")
 
-            if headless or is_jenkins:
-                options.add_argument("--headless=new")
+            # Настройки для Mac M1
+            if is_mac_arm:
+                options.binary_location = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
-            # Настройки для Docker и Jenkins
-            if is_docker or is_jenkins:
+            # Headless режим
+            if headless:
+                options.add_argument("--headless=new")
                 options.add_argument("--disable-gpu")
+
+            # Настройки для CI
+            if is_jenkins or is_docker:
                 options.add_argument("--remote-debugging-port=9222")
                 options.add_argument("--disable-extensions")
                 options.add_argument("--disable-logging")
                 options.add_argument("--log-level=3")
 
-            if use_wdm or is_jenkins:
-                # Используем WebDriver Manager с автоматической загрузкой
-                service = ChromeService(ChromeDriverManager().install())
-            else:
-                # Локальный запуск с системным драйвером
-                service = ChromeService()
-
+            # Инициализация драйвера
+            service = ChromeService(ChromeDriverManager().install())
             driver = webdriver.Chrome(service=service, options=options)
 
         elif browser_name in ["firefox", "ff"]:
             options = FFOptions()
+
             if headless:
                 options.add_argument("--headless")
-            driver = webdriver.Firefox(options=options)
+
+            service = FirefoxService(GeckoDriverManager().install())
+            driver = webdriver.Firefox(service=service, options=options)
 
         elif browser_name in ["yandex", "ya"]:
             options = ChromeOptions()
+
             if headless:
                 options.add_argument("--headless=new")
-            service = ChromiumService(
-                executable_path="/Users/userqa/Documents/drivers/yandexdriver"
-            )
+
+            # Для Yandex используем ChromeDriver с указанием пути к бинарнику Yandex
+            options.binary_location = "/Applications/Yandex.app/Contents/MacOS/Yandex"
+            service = ChromeService(ChromeDriverManager().install())
             driver = webdriver.Chrome(service=service, options=options)
 
-        else:
-            raise ValueError(f"Unsupported browser: {browser_name}")
+        # Добавляем атрибуты для совместимости с существующими тестами
+        driver.test_name = request.node.name
+        driver.start_time = datetime.now()
 
-        driver.implicitly_wait(10)
+        # Сохраняем драйвер в сессии
+        request.session.driver = driver
 
-
+        # Логирование возможностей браузера
         allure.attach(
             name="browser_capabilities",
             body=json.dumps(driver.capabilities, indent=4, ensure_ascii=False),
             attachment_type=allure.attachment_type.JSON,
         )
 
-        driver.test_name = request.node.name
-        driver.start_time = datetime.now()
-
-        driver.set_window_size(1920, 1080)
+        # Открытие базового URL
         driver.get(base_url)
         WebDriverWait(driver, 20).until(
             lambda d: d.execute_script("return document.readyState") == "complete"
         )
-        logger.info(f"Opened URL: {base_url}")
-
-        request.session.driver = driver
+        logger.info(f"Successfully opened URL: {base_url}")
 
         yield driver
 
     except WebDriverException as e:
         logger.error(f"WebDriver error: {str(e)}")
-        if "Unable to obtain driver for chrome" in str(e):
-            logger.error("Possible solutions:")
-            logger.error("1. Check Chrome and ChromeDriver versions compatibility")
-            logger.error("2. Add --use_wdm flag to use WebDriver Manager")
-            logger.error("3. For Docker, ensure Chrome is installed in container")
         pytest.fail(f"WebDriver error: {str(e)}")
 
-    except Exception as e:
-        logger.error(f"Browser initialization failed: {str(e)}")
-        pytest.fail(f"Browser initialization failed: {str(e)}")
-
     finally:
-        if (
-            driver
-            and hasattr(request.node, "rep_call")
-            and request.node.rep_call.failed
-        ):
-            try:
-                allure.attach(
-                    driver.get_screenshot_as_png(),
-                    name="final_screenshot",
-                    attachment_type=allure.attachment_type.PNG,
-                )
-            except Exception as e:
-                logger.error(f"Failed to take final screenshot: {str(e)}")
-
         if driver:
             driver.quit()
             logger.info("Browser closed")
@@ -194,11 +178,20 @@ def browser(request):
 
 @pytest.fixture(scope="session")
 def base_url(request):
+    """Фикстура для базового URL"""
     return request.config.getoption("--base_url")
 
 
 @pytest.fixture(autouse=True)
 def log_test_info(request):
+    """Фикстура для логирования информации о тестах"""
     logger.info(f"\n=== Starting test: {request.node.name} ===\n")
     yield
     logger.info(f"\n=== Finished test: {request.node.name} ===\n")
+
+
+def pytest_configure(config):
+    """Конфигурация pytest при запуске"""
+    os.makedirs("allure-results/screenshots", exist_ok=True)
+    os.makedirs("test-results", exist_ok=True)
+    logger.info("Pytest configuration completed")

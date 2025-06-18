@@ -10,6 +10,8 @@ from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chromium.service import ChromiumService
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.firefox.options import Options as FFOptions
+from selenium.webdriver.chrome.service import Service as ChromeService
+from webdriver_manager.chrome import ChromeDriverManager
 
 
 logger = logging.getLogger(__name__)
@@ -38,6 +40,12 @@ def pytest_addoption(parser):
         action="store_true",
         default=True,
         help="Run tests in headless mode",
+    )
+    parser.addoption(
+        "--use_wdm",
+        action="store_true",
+        default=True,
+        help="Use WebDriver Manager for automatic driver setup",
     )
 
 
@@ -74,6 +82,9 @@ def browser(request):
     browser_name = request.config.getoption("--browser").lower()
     base_url = request.config.getoption("--base_url")
     headless = request.config.getoption("--headless")
+    use_wdm = request.config.getoption("--use_wdm")
+    is_jenkins = os.environ.get('JENKINS_HOME') is not None
+    is_docker = os.path.exists('/.dockerenv')
 
     logger.info(f"Starting {browser_name} browser, headless={headless}")
 
@@ -81,19 +92,31 @@ def browser(request):
     try:
         if browser_name in ["chrome", "ch"]:
             options = ChromeOptions()
-            if headless:
+
+            # Общие настройки для Chrome
+            options.add_argument("--window-size=1920,1080")
+            options.add_argument("--no-sandbox")
+            options.add_argument("--disable-dev-shm-usage")
+
+            if headless or is_jenkins:
                 options.add_argument("--headless=new")
-                options.add_argument("--window-size=1920,1080")
+
+            # Настройки для Docker и Jenkins
+            if is_docker or is_jenkins:
                 options.add_argument("--disable-gpu")
-                options.add_argument("--no-sandbox")
-                options.add_argument("--disable-dev-shm-usage")
                 options.add_argument("--remote-debugging-port=9222")
-                options.add_argument("--start-maximized")
-                options.add_argument("--disable-infobars")
                 options.add_argument("--disable-extensions")
-                options.add_argument("--disable-notifications")
-                options.add_argument("--lang=en-US")
-            driver = webdriver.Chrome(options=options)
+                options.add_argument("--disable-logging")
+                options.add_argument("--log-level=3")
+
+            if use_wdm or is_jenkins:
+                # Используем WebDriver Manager с автоматической загрузкой
+                service = ChromeService(ChromeDriverManager().install())
+            else:
+                # Локальный запуск с системным драйвером
+                service = ChromeService()
+
+            driver = webdriver.Chrome(service=service, options=options)
 
         elif browser_name in ["firefox", "ff"]:
             options = FFOptions()
@@ -114,6 +137,7 @@ def browser(request):
             raise ValueError(f"Unsupported browser: {browser_name}")
 
         driver.implicitly_wait(10)
+
 
         allure.attach(
             name="browser_capabilities",
@@ -136,7 +160,12 @@ def browser(request):
         yield driver
 
     except WebDriverException as e:
-        logger.error(f"WebDriver error during initialization: {str(e)}")
+        logger.error(f"WebDriver error: {str(e)}")
+        if "Unable to obtain driver for chrome" in str(e):
+            logger.error("Possible solutions:")
+            logger.error("1. Check Chrome and ChromeDriver versions compatibility")
+            logger.error("2. Add --use_wdm flag to use WebDriver Manager")
+            logger.error("3. For Docker, ensure Chrome is installed in container")
         pytest.fail(f"WebDriver error: {str(e)}")
 
     except Exception as e:
